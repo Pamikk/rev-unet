@@ -1,9 +1,12 @@
-# Deep Learning Template
-This is a code template to train and test deep learning frameworks, I will orignize all of my dl related codes into this structure.
-## Template Code Structure for Deep Learning
+# Reversible U-net for image segmentation
++ This is a re-implementation of my course project for Medical Image Analysis based on paper:
++ Dataset: Hippocampus segmentation of Medical Segmentation Decathlon
+  + I choose it because it is a 
+## Code Structure for Deep Learning
   + Data
-    + dataset annotation
-    + dataset pre-processing/analyze
+    + process_hdf5 save as hdf5
+    + process_json 
+      + json output with images path and label path
   + Models
     + utils - necessary function
       + maybe move evaluation metric here?
