@@ -17,6 +17,9 @@ subset_size = 200
 dtype = np.float32
 inp_exts = ['']
 mask_exts = ['_seg']
+tsize = (48, 64, 48)
+channel = 1
+target_resolution = (1.0,1.0,1.0)
 def crop_alldim_3d(image, mask=None):
     h,w,d,_ = image.shape
 
@@ -48,8 +51,12 @@ def load_niis(path,name,exts=['']):
         affines.append(nimg.affine)
         headers.append(nimg.header)
     return np.stack(imgs,-1),affines[0],headers[0] 
-def get_mode
-def process_train_data(input_path,save_path,channels,tsize,target_resolution):
+def get_mode(idx):
+    if idx%10>=8: #train/val =4/1
+        return 'val'
+    else:
+        return 'train'
+def process_train_data(input_path,save_path,channels,tsize):
     assert len(tsize) == dimension
     assert len(target_resolution) == dimension
     hdf5_file = h5py.File(save_path, "w")
@@ -92,25 +99,16 @@ def process_train_data(input_path,save_path,channels,tsize,target_resolution):
             w,h,d = img.shape[:3]
             mWc,mHc,mDc = (mWc,w),(mHc,h),(mDc,d)
 
-            psize = (img_header.structarr['pixdim'][1],
-                       img_header.structarr['pixdim'][2],
-                       img_header.structarr['pixdim'][3])
-            scale_vector = [psize[0] / target_resolution[0],
-                            psize[1] / target_resolution[1],
-                            psize[2]/ target_resolution[2]]
 
         
 def load_and_process_data(input_path,save_path,channels,mode='train',
-                          tsize=None,target_resolution=None,overwrite=False):
-    target_name = f'data_{mode}.hdf5'
-    
-    data_path = os.path.join(save_path,target_name)
-
+                          tsize=None,overwrite=False):
+    data_path = os.path.join(save_path,f'data_{mode}.hdf5')
     if not(os.path.exists(save_path)):
         os.mkdir(save_path)
     if not os.path.exists(data_path) or overwrite:
         if mode=='train':
-            process_train_data(input_path,data_path,channels,tsize,target_resolution)
+            process_train_data(input_path,save_path,channels,tsize)
         elif mode=='val':
             pass
             #process_val_data(input_path,data_path,channels,tsize)
@@ -124,12 +122,16 @@ if __name__ == "__main__":
     parser.add_argument("--save", type=str, default='processed', help="save path")
     parser.add_argument("--dim", type=int, default=3, help="image dimension")
     parser.add_argument("--channel", type=int, default=1, help="image dimension")
-    parser.add_argument("--test",action='store_true',help='generate test set ')
+    parser.add_argument("--mode",typ=str,default='train',help='train|test|val')
     parser.add_argument("--overwrite",action='store_true',help='overwrite or not')
+    parser.add_argument("--tsize", type=tuple, default=None, help="target size")
     args = parser.parse_args()
     dimension = args.dim
     save_path = os.path.join(args.pr,args.save)
-    input_train_path = os.path.join(args.pr,args.train)
-    input_val_path = os.path.join(args.pr,args.val)
+    input_path = os.path.join(args.pr,args.train) if args.mode=='train' else os.path.join(args.pr,args.val)
+    tsize = args.tsize if not args.tsize is None else tsize
+    load_and_process_data(input_path,save_path,args.channels,tsize)
+
+    
 
                           
