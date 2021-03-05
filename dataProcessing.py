@@ -1,13 +1,14 @@
 import torch.utils.data as data
 import torch
 import json
+import h5py
 import numpy as np
 import random
 import cv2
 import os
 from torch.nn import functional as F
 
-ls = 1 #0 for only bboxes,1 for labels and bboxes
+aug_options = ['flip','rot','trans','crop']
 #stack functions for collate_fn
 #Notice: all dicts need have same keys and all lists should have same length
 def stack_dicts(dicts):
@@ -37,101 +38,90 @@ def rand(item):
             return 0
     finally:
         return tuple(tmp)   
-def get_croppable_part(labels,size):
-    h,w = size
-    min_x = torch.min(labels[:,ls]-labels[:,ls+2]/2)
-    min_y = torch.min(labels[:,ls+1]-labels[:,ls+3]/2)
-    max_x = torch.max(labels[:,ls]+labels[:,ls+2]/2)
-    max_y = torch.max(labels[:,ls+1]+labels[:,ls+3]/2)
-    return (max(min_x,0),max(0,min_y),min(w-1,max_x),min(h-1,max_y))
-def valid_scale(src,vs):
-    img = cv2.cvtColor(src,cv2.COLOR_RGB2HSV).astype(np.float)
-    img[:,:,2] *= (1+vs)
-    img[:,:,2][img[:,:,2]>255] = 255
-    img = cv2.cvtColor(img.astype(np.int8),cv2.COLOR_HSV2RGB).astype(np.float)
-    return img
 def resize(src,tsize):
     dst = cv2.resize(src,(tsize[1],tsize[0]),interpolation=cv2.INTER_LINEAR)
     return dst
-def translate(src,labels,trans):
-    h,w,_ = src.shape
-    if labels.shape[0]>0:
-        mx,my,mxx,mxy = get_croppable_part(labels,(h,w))
-        tx = random.uniform(-min(mx,w*trans),min(w*trans,w-mxx-1))
-        ty = random.uniform(-min(my,h*trans),min(h*trans,h-mxy-1))
+def translate_3d(src,mask,trans,z_enable=True):
+    h,w,d = src.shape[:3]
+    tx = int(random.uniform(-w*trans,w*trans))
+    ty = int(random.uniform(-h*trans,h*trans))
+    if z_enable:
+        tz = int(random.uniform(-d*trans,d*trans))
     else:
-        tx = random.uniform(-w*trans,w*trans)
-        ty = random.uniform(-h*trans,h*trans)
-    mat = np.array([[1,0,tx],[0,1,ty]])
-    dst = cv2.warpAffine(src,mat,(w,h))
-    labels[:,ls] += tx
-    labels[:,ls+1] += ty
+        tz = 0
+    dsx = slice(max(tx,0),min(tx+w,w))
+    dsy = slice(max(ty,0),min(ty+h,h))
+    dsz = slice(max(tz,0),min(tz+d,d))
+    srx = slice(max(-tx,0),min(-tx+w,w))
+    sry = slice(max(-ty,0),min(-ty+h,h))
+    srz = slice(max(-tz,0),min(-tz+d,d))
+    dst = np.zeros_like(src)
+    mask_dst = np.zeros_like(mask)
+    dst[dsy,dsx,dsz,:] = src[sry,srx,srz,:]
+    mask_dst[dsy,dsx,dsz,:] = mask[sry,srx,srz,:]
+    return dst,mask_dst
     
     return dst,labels
-def crop(src,labels,crop):
-    h,w,_ = src.shape
-    if ((w<10)or(h<10)):
-        return src,labels
-    if labels.shape[0]>0:
-        mx,my,mxx,mxy = get_croppable_part(labels,(h,w))
-        txm = int(random.uniform(0,min(mx,w*crop)))
-        tym = int(random.uniform(0,min(my,h*crop)))
-        txmx = int(random.uniform(max(mxx,w*(1-crop)),w))
-        tymx = int(random.uniform(max(mxy,h*(1-crop)),h))
-        labels[:,ls] -= txm
-        labels[:,ls+1] -= tym
+def crop_3d(src,mask,crop,z_enable=True):
+    h,w,d = src.shape[:3]
+    txm = int(random.uniform(0,w*crop))
+    tym = int(random.uniform(0,h*crop))
+    if z_enable:
+        txm = int(random.uniform(0,d*crop))
+        tzmx = int(random.uniform(d*(1-crop),d-0.1))
     else:
-        txm = int(random.uniform(0,w*crop))
-        tym = int(random.uniform(0,h*crop))
-        txmx = int(random.uniform(w*(1-crop),w-0.1))
-        tymx = int(random.uniform(h*(1-crop),h-0.1))
-    dst = src.copy()
-    dst = dst[tym:tymx+1,txm:txmx+1,:]
-    
-    return dst,labels
-def rotate(src,labels,ang,scale):
-    h,w,_ = src.shape
+        txm = 0
+        tzmx = d-1    
+    txmx = int(random.uniform(w*(1-crop),w-0.1))
+    tymx = int(random.uniform(h*(1-crop),h-0.1))
+    dst = (src[tym:tymx+1,txm:txmx+1,tzm:tzmx+1,:]).copy()
+    mask_dst = (mask[tym:tymx+1,txm:txmx+1,tzm:tzmx+1,:]).copy()
+    return dst,mask
+def rotate(src,mask,ang,scale):
+    if len(src.shape)>3:
+        src = src.squeeze()
+    h,w = src.shape[:2]
     center =(w/2,h/2)
     mat = cv2.getRotationMatrix2D(center, ang, scale)
-    dst = cv2.warpAffine(src,mat,(w,h))
-    labels_ = labels.clone()
-    if labels.shape[0]>0:
-        xs,ys,ws,hs = labels[:,ls:].t()
-        n = len(xs)
-        sx = abs(mat[0,0])
-        sy = abs(mat[0,1])
-        pts = np.stack([xs,ys,np.ones([n])],axis=1).T
-        tpts = torch.tensor(np.dot(mat,pts).T,dtype=torch.float)
-        labels_[:,ls] = tpts[:,0]
-        labels_[:,ls+1] = tpts[:,1]
-        labels_[:,ls+2] = (sx*ws + sy*hs)*scale
-        labels_[:,ls+3] = (sx*hs + sy*ws)*scale
-        mask = (tpts[:,0]>0)&(tpts[:,0]<w)&(tpts[:,1]>0)&(tpts[:,1]<h)
-        labels_ = labels_[mask,:]
-    return dst,labels_
-def flip(src,labels):
-    w = src.shape[1]
-    dst = cv2.flip(src,1)
-    labels[:,ls] = w-1-labels[:,ls]
-    return dst,labels
-def color_normalize(img,mean):
-    img = img.astype(np.float)
-    if img.max()>1:
-        img /= 255
-    img -= np.array(mean)/255
-    return img
-
+    dst = cv2.warpAffine(src,mat,(w,h),interpolation=cv2.INTER_CUBIC)
+    mask_dst = cv2.warpAffine(mask,mat,(w,h),interpolation=cv2.INTER_NEAREST)
+    return dst,mask_dst
+def flip(src,mask,dim):
+    dst = np.flip(src,dim)
+    mask =np.flip(mask,dim)
+    return dst,mask
 class Mydataset(data.Dataset):
     def __init__(self,cfg,mode='train'):
-        self.img_path = cfg.img_path
         self.cfg = cfg
-        data = json.load(open(cfg.file,'r'))
-        self.imgs = list(data.keys())
-        self.annos = data
+        data = h5py.File(cfg.file_path)
         self.mode = mode
         self.accm_batch = 0
         self.size = cfg.size
-        self.aug = cfg.augment
+    def random_aug_3d(self,img,mask):
+        assert len(img.shape) == 4
+        assert len(mask.shape) == 4
+        augs = random.sample(aug_options,k=random.randint(0,self.aug_num))
+        if ('flip' in augs) and self.cfg.flip:
+            if self.cfg.z_enable:
+                dims = random.sample(range(3),k=random.randint(1,3))
+            else:
+                dims = random.sample(range(3),k=random.randint(1,2))
+            for d in dims:  
+                img,mask = flip(img,mask,dim=d)
+        if ('trans' in augs) and self.cfg.trans:
+            img,mask = translate(img,mask,self.cfg.trans,self.cfg.z_enable)
+        if ('crop' in augs) and self.cfg.crop:
+            img,mask = crop(img,mask,self.cfg.crop,self.cfg.z_enable)
+        if ('rot' in augs) and self.cfg.rot:
+            ang = random.uniform(-self.cfg.rot,self.cfg.rot)
+            scale = random.uniform(1-self.cfg.scale,1+self.cfg.scale)
+            if self.cfg.z_enable:
+                dims = random.sample(range(3),k=random.randint(1,3))
+            else:
+                dims = random.sample(range(3),k=random.randint(1,2))
+            for d in dims:
+               slices
+               img,mask= rotate(img,mask,ang,scale)
     def __len__(self):
         return len(self.imgs)
 
@@ -181,20 +171,7 @@ class Mydataset(data.Dataset):
         if self.mode=='train':
             aug = []
             if self.aug:
-                if (random.randint(0,1)==1) and self.cfg.flip:
-                    img,labels = flip(img,labels)
-                    aug.append('flip')
-                if (random.randint(0,1)==1) and self.cfg.trans:
-                    img,labels = translate(img,labels,self.cfg.trans)
-                    aug.append('trans')
-                if (random.randint(0,1)==1) and self.cfg.crop:
-                    img,labels = crop(img,labels,self.cfg.crop)
-                    aug.append('crop')
-                if (random.randint(0,1)==1) and self.cfg.rot:
-                    ang = random.uniform(-self.cfg.rot,self.cfg.rot)
-                    scale = random.uniform(1-self.cfg.scale,1+self.cfg.scale)
-                    img,labels = rotate(img,labels,ang,scale)
-                    aug.append('rot')
+                
             img,pad = self.pad_to_square(img)
             size = img.shape[0]
             labels[:,ls]+= pad[1]
@@ -235,7 +212,7 @@ class Mydataset(data.Dataset):
         for i,bboxes in enumerate(labels):
             if len(bboxes)>0:
                 label = torch.zeros(len(bboxes),ls+5)
-                label[:,1:] = bboxes
+                
                 label[:,0] = i
                 tmp.append(label)
         if len(tmp)>0:

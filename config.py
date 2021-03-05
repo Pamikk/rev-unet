@@ -6,23 +6,12 @@ import json
 class Config:
     def __init__(self,mode='train'):
         #Path Setting
-        self.img_path = f'../dataset/'
         self.checkpoint='../checkpoints'
         self.cls_num = 20        
-        self.res = 50
-        self.size = 608
-        self.multiscale = 3
-        self.sizes = [608]#list(range(self.size-32*self.multiscale,self.size+32*self.multiscale+1,32)) 
-        self.nms_threshold = 0.5
-        self.dc_threshold = 0.95
-
-        self.anchors= anchors  
-        self.anchor_divide=[(6,7,8),(3,4,5),(0,1,2)]
-        self.anchor_num = len(self.anchors)
-        self.model_path = "models/yolov3-spp.cfg"
+        self.tsize = (48, 64, 48)
+        self.channel = 1
         
         self.bs = 8       
-        self.pre_trained_path = '../network_weights'
         self.augment = False
         #train_setting
         self.lr = 0.001
@@ -45,17 +34,18 @@ class Config:
         self.match_threshold = 0#regard as match above this threshold
         self.base_epochs = [-1]#base epochs with large learning rate,adjust lr_facter with 0.1
         if mode=='train':
-            self.file=f'./data/train.json'
+            self.file_path=f'./data/train.json'
             self.bs = 32 # batch size
             
             #augmentation parameter
             self.augment = True
+            self.z_enable = True
             self.flip = True
-            self.rot = 25
-            self.crop = 0.3
-            self.trans = .3
-            self.scale = 0.2
-            self.valid_scale = 0.25
+            self.rot = 10
+            self.crop = 0.15
+            self.trans = .15
+            self.scale = 0.1
+            self.elastic = 0.1
             
         elif mode=='val':
             self.file = f'./data/val.json'
