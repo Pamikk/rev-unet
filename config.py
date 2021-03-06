@@ -34,7 +34,7 @@ class Config:
         self.match_threshold = 0#regard as match above this threshold
         self.base_epochs = [-1]#base epochs with large learning rate,adjust lr_facter with 0.1
         if mode=='train':
-            self.file_path=f'./data/train.json'
+            self.file_path=f'../dataset/Mydataset/processed/data_train.hdf5'
             self.bs = 32 # batch size
             
             #augmentation parameter
@@ -48,11 +48,6 @@ class Config:
             self.scale = 0.1
             self.intensity = 0.2
             self.elastic = 10
-            
-        elif mode=='val':
-            self.file = f'./data/val.json'
-        elif mode=='trainval':
-            self.file = f'./data/trainval.json'
         elif mode=='test':
             self.file = f'./data/test.json'
         

@@ -1,12 +1,13 @@
 import torch.utils.data as data
 import torch
-import json
 import h5py
 import numpy as np
 import random
 import cv2
 import os
 from torch.nn import functional as F
+
+from data.utils import crop_or_pad_slice_to_size
 
 aug_options = ['flip','rot','trans','crop','elastic','intensity']
 #stack functions for collate_fn
@@ -38,9 +39,6 @@ def rand(item):
             return 0
     finally:
         return tuple(tmp)   
-def resize(src,tsize):
-    dst = cv2.resize(src,(tsize[1],tsize[0]),interpolation=cv2.INTER_LINEAR)
-    return dst
 def translate_3d(src,mask,trans,z_enable=True):
     h,w,d = src.shape[:3]
     tx = int(random.uniform(-w*trans,w*trans))
@@ -100,19 +98,23 @@ def elastic(src,dx,dy,interp=cv2.INTER_LINEAR):
     dst = cv2.remap(src, map_x, map_y, interpolation=interp, borderMode=cv2.BORDER_REFLECT)
     dst = np.expand_dims(dst,tuple(dims[0]))
     return dst
-
-
 def flip(src,mask,dim):
     dst = np.flip(src,dim)
     mask =np.flip(mask,dim)
     return dst,mask
 class Mydataset(data.Dataset):
-    def __init__(self,cfg,mode='train'):
+    def __init__(self,cfg,mode='train',aug=True):
         self.cfg = cfg
-        self.data = h5py.File(cfg.file_path)
+        data = h5py.File(cfg.file_path,'r')
         self.mode = mode
-        self.accm_batch = 0
+        self.imgs = data[f'imgs_{mode}']
+        if mode!='test':
+            
+            self.masks = data[f'masks_{mode}']
+        else:
+            self.offsets = data[f'offset_{mode}']
         self.size = cfg.tsize
+        self.aug = aug
     def random_aug_3d(self,img,mask):
         if len(img.shape) < 4:
             img = np.expand_dims(img,axis=-1)
@@ -168,39 +170,39 @@ class Mydataset(data.Dataset):
         if ('intensity' in augs) and self.cfg.intensity:
             for i in range(img.shape[-1]): 
                 img[:, :, :, i] *= (1 + np.random.uniform(-self.cfg.intensity,self.cfg.intensity))
+        if img.shape[:3] != self.size:
+            img = crop_or_pad_slice_to_size(img,self.size,1)
+            mask = crop_or_pad_slice_to_size(mask,self.size,1)
         return img,mask,augs
-
     def __len__(self):
         return len(self.imgs)
-
     def img_to_tensor(self,img):
         if len(img.shape) < 4:
             img = np.expand_dims(img,axis=-1)
         data = torch.tensor(np.transpose(img,[3,0,1,2]),dtype=torch.float)
         return data
     def gen_gts(self,mask):
-        #transfer to on-shot
-        return mask
-        
-
+        #transfer to one-hot
+        mask = mask.squeeze()
+        h,w,d = mask.shape[:3]
+        idxs = np.unique(mask).astype(int)
+        labels = torch.zeros((h,w,d,len(idxs)),dtype=torch.float)
+        for i in idxs:
+            labels[...,i] = torch.tensor(mask == i)
+        return labels
     def __getitem__(self,idx):
         #print(name)
-        if self.mode=='train':
-            aug = []
-            if self.aug:
+        img = self.imgs[idx]
+        if self.mode!='test':            
+            mask = self.masks[idx]
+            if (self.mode=='train') and self.aug:
                 img,mask,_ = self.random_aug_3d(img,mask)
             labels = self.gen_gts(mask)
             data = self.img_to_tensor(img)
             return data,labels      
         else:
-            #validation set
-            data = self.img_to_tensor(img)
-            if self.mode=='val':
-                labels = self.gen_gts(mask)
-                return data,labels
-            else:
-                #test
-                return data,offsets
+            offset = torch.tensor(self.offsets[idx])
+            return data,offset
 
                 
 

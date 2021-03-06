@@ -5,7 +5,7 @@
 ## Code Structure for Deep Learning
   + Data
     + process_hdf5 save as hdf5
-    + process_json 
+    + process_json(tbd) 
       + json output with images path and label path
   + Models
     + utils - necessary function
