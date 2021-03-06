@@ -60,35 +60,37 @@ def translate_3d(src,mask,trans,z_enable=True):
     dst[dsy,dsx,dsz,:] = src[sry,srx,srz,:]
     mask_dst[dsy,dsx,dsz,:] = mask[sry,srx,srz,:]
     return dst,mask_dst
-    
-    return dst,labels
 def crop_3d(src,mask,crop,z_enable=True):
     h,w,d = src.shape[:3]
     txm = int(random.uniform(0,w*crop))
     tym = int(random.uniform(0,h*crop))
     if z_enable:
-        txm = int(random.uniform(0,d*crop))
+        tzm = int(random.uniform(0,d*crop))
         tzmx = int(random.uniform(d*(1-crop),d-0.1))
     else:
-        txm = 0
+        tzm = 0
         tzmx = d-1    
     txmx = int(random.uniform(w*(1-crop),w-0.1))
     tymx = int(random.uniform(h*(1-crop),h-0.1))
     dst = (src[tym:tymx+1,txm:txmx+1,tzm:tzmx+1,:]).copy()
     mask_dst = (mask[tym:tymx+1,txm:txmx+1,tzm:tzmx+1,:]).copy()
-    return dst,mask
-def rotate(src,ang,scale,interp = cv2.INTER_CUBIC):
-    if len(src.shape)>3:
-        src = src.squeeze()
+    return dst,mask_dst
+def rotate(src,ang,scale,interp = cv2.INTER_LINEAR):
+    dims = np.where(np.array(src.shape)==1)
+    src = src.squeeze()
     h,w = src.shape[:2]
     center =(w/2,h/2)
     mat = cv2.getRotationMatrix2D(center, ang, scale)
-    dst = cv2.warpAffine(src,mat,(w,h),interpolation=interp)
+    #print(src.shape)
+    dst = cv2.warpAffine(src,mat,(w,h),flags=interp)
+    dst = np.expand_dims(dst,tuple(dims[0]))
     return dst
-def elastic(src,dx,dy,interp=cv2.INTER_CUBIC):
+def elastic(src,dx,dy,interp=cv2.INTER_LINEAR):
   # elastic deformation is a aug tric also applied in u-net
   # it was described in Best Practices for Convolutional Neural Networks applied to Visual Document Analysis 
   # as random distoration for every pixel
+    dims = np.where(np.array(src.shape)==1)
+    src = src.squeeze()
     nx, ny = dx.shape
 
     grid_y, grid_x = np.meshgrid(np.arange(nx), np.arange(ny), indexing="ij")
@@ -96,6 +98,7 @@ def elastic(src,dx,dy,interp=cv2.INTER_CUBIC):
     map_x = (grid_x + dx).astype(np.float32)
     map_y = (grid_y + dy).astype(np.float32)
     dst = cv2.remap(src, map_x, map_y, interpolation=interp, borderMode=cv2.BORDER_REFLECT)
+    dst = np.expand_dims(dst,tuple(dims[0]))
     return dst
 
 
@@ -106,14 +109,16 @@ def flip(src,mask,dim):
 class Mydataset(data.Dataset):
     def __init__(self,cfg,mode='train'):
         self.cfg = cfg
-        data = h5py.File(cfg.file_path)
+        self.data = h5py.File(cfg.file_path)
         self.mode = mode
         self.accm_batch = 0
-        self.size = cfg.size
+        self.size = cfg.tsize
     def random_aug_3d(self,img,mask):
-        assert len(img.shape) == 4
-        assert len(mask.shape) == 4
-        augs = random.sample(aug_options,k=random.randint(0,self.aug_num))
+        if len(img.shape) < 4:
+            img = np.expand_dims(img,axis=-1)
+        if len(mask.shape) < 4:
+            mask = np.expand_dims(mask,axis=-1)
+        augs = random.sample(aug_options,k=random.randint(0,self.cfg.aug_num))
         if ('flip' in augs) and self.cfg.flip:
             if self.cfg.z_enable:
                 dims = random.sample(range(3),k=random.randint(1,3))
@@ -122,12 +127,10 @@ class Mydataset(data.Dataset):
             for d in dims:  
                 img,mask = flip(img,mask,dim=d)
         if ('trans' in augs) and self.cfg.trans:
-            img,mask = translate(img,mask,self.cfg.trans,self.cfg.z_enable)
+            img,mask = translate_3d(img,mask,self.cfg.trans,self.cfg.z_enable)
         if ('crop' in augs) and self.cfg.crop:
-            img,mask = crop(img,mask,self.cfg.crop,self.cfg.z_enable)
+            img,mask = crop_3d(img,mask,self.cfg.crop,self.cfg.z_enable)
         if ('rot' in augs) and self.cfg.rot:
-            ang = random.uniform(-self.cfg.rot,self.cfg.rot)
-            scale = random.uniform(1-self.cfg.scale,1+self.cfg.scale)
             h,w,d = img.shape[:3]
             if self.cfg.z_enable:
                 dims = random.sample(range(3),k=random.randint(1,3))
@@ -135,40 +138,44 @@ class Mydataset(data.Dataset):
                 dims = random.sample(range(2),k=random.randint(1,2))
             for idx in dims:
                slices=[slice(0,h),slice(0,w),slice(0,d)]
+               ang = random.uniform(-self.cfg.rot,self.cfg.rot)
+               scale = random.uniform(1-self.cfg.scale,1+self.cfg.scale)
                for i in range(img.shape[idx]):
-                   slices[idx] = slice(i)
+                   slices[idx] = slice(i,i+1)
                    img[slices[0],slices[1],slices[2],:]= rotate(img[slices[0],slices[1],slices[2],:],ang,scale)
                    mask[slices[0],slices[1],slices[2],:] = rotate(mask[slices[0],slices[1],slices[2],:],ang,scale,interp=cv2.INTER_NEAREST)
-        if ('elastic' in augs) and self.elastic:
+        if ('elastic' in augs) and self.cfg.elastic:
             h,w,d = img.shape[:3]
             mu = 0
-            sigma = random.uniform(0,self.elastic)
+            sigma = random.uniform(0,self.cfg.elastic)
 
             dx = np.random.normal(mu, sigma, (3,3))
             dx_img = cv2.resize(dx, (w,h), interpolation=cv2.INTER_CUBIC)
 
             dy = np.random.normal(mu, sigma, (3,3))
-            dy_img = cv2.resize(dx, (w,h), interpolation=cv2.INTER_CUBIC)
+            dy_img = cv2.resize(dy, (w,h), interpolation=cv2.INTER_CUBIC)
 
             for z in range(d):
                 img[:, :, z, :] = elastic(img[:,:,z,:],dx_img, dy_img,cv2.INTER_CUBIC)
                 mask[:, :, z, :] = elastic(mask[:, :, z, :], dx_img, dy_img, cv2.INTER_NEAREST)
-            if self.z_enable:
-                dx_img = np.zeros((h,w))
+            if self.cfg.z_enable:
+                dx_img = np.zeros((w,d))
                 dy = np.random.normal(mu, sigma, (3,3))
-                dy_img = cv2.resize(dx, (w,h), interpolation=cv2.INTER_CUBIC)
+                dy_img = cv2.resize(dx, (d,w), interpolation=cv2.INTER_CUBIC)
                 for y in range(h):
                     img[y, ...] = elastic(img[y,...],dx_img, dy_img)
                     mask[y, ...] = elastic(mask[y,...], dx_img, dy_img, cv2.INTER_NEAREST)
         if ('intensity' in augs) and self.cfg.intensity:
             for i in range(img.shape[-1]): 
                 img[:, :, :, i] *= (1 + np.random.uniform(-self.cfg.intensity,self.cfg.intensity))
-        return img,mask
+        return img,mask,augs
 
     def __len__(self):
         return len(self.imgs)
 
     def img_to_tensor(self,img):
+        if len(img.shape) < 4:
+            img = np.expand_dims(img,axis=-1)
         data = torch.tensor(np.transpose(img,[3,0,1,2]),dtype=torch.float)
         return data
     def gen_gts(self,mask):
@@ -181,7 +188,7 @@ class Mydataset(data.Dataset):
         if self.mode=='train':
             aug = []
             if self.aug:
-                img,mask = self.random_aug_3d(img,mask)
+                img,mask,_ = self.random_aug_3d(img,mask)
             labels = self.gen_gts(mask)
             data = self.img_to_tensor(img)
             return data,labels      

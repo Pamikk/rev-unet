@@ -39,6 +39,7 @@ class Config:
             
             #augmentation parameter
             self.augment = True
+            self.aug_num = 3
             self.z_enable = True
             self.flip = True
             self.rot = 10
