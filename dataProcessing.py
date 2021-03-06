@@ -8,7 +8,7 @@ import cv2
 import os
 from torch.nn import functional as F
 
-aug_options = ['flip','rot','trans','crop']
+aug_options = ['flip','rot','trans','crop','elastic','intensity']
 #stack functions for collate_fn
 #Notice: all dicts need have same keys and all lists should have same length
 def stack_dicts(dicts):
@@ -77,15 +77,28 @@ def crop_3d(src,mask,crop,z_enable=True):
     dst = (src[tym:tymx+1,txm:txmx+1,tzm:tzmx+1,:]).copy()
     mask_dst = (mask[tym:tymx+1,txm:txmx+1,tzm:tzmx+1,:]).copy()
     return dst,mask
-def rotate(src,mask,ang,scale):
+def rotate(src,ang,scale,interp = cv2.INTER_CUBIC):
     if len(src.shape)>3:
         src = src.squeeze()
     h,w = src.shape[:2]
     center =(w/2,h/2)
     mat = cv2.getRotationMatrix2D(center, ang, scale)
-    dst = cv2.warpAffine(src,mat,(w,h),interpolation=cv2.INTER_CUBIC)
-    mask_dst = cv2.warpAffine(mask,mat,(w,h),interpolation=cv2.INTER_NEAREST)
-    return dst,mask_dst
+    dst = cv2.warpAffine(src,mat,(w,h),interpolation=interp)
+    return dst
+def elastic(src,dx,dy,interp=cv2.INTER_CUBIC):
+  # elastic deformation is a aug tric also applied in u-net
+  # it was described in Best Practices for Convolutional Neural Networks applied to Visual Document Analysis 
+  # as random distoration for every pixel
+    nx, ny = dx.shape
+
+    grid_y, grid_x = np.meshgrid(np.arange(nx), np.arange(ny), indexing="ij")
+
+    map_x = (grid_x + dx).astype(np.float32)
+    map_y = (grid_y + dy).astype(np.float32)
+    dst = cv2.remap(src, map_x, map_y, interpolation=interp, borderMode=cv2.BORDER_REFLECT)
+    return dst
+
+
 def flip(src,mask,dim):
     dst = np.flip(src,dim)
     mask =np.flip(mask,dim)
@@ -115,115 +128,72 @@ class Mydataset(data.Dataset):
         if ('rot' in augs) and self.cfg.rot:
             ang = random.uniform(-self.cfg.rot,self.cfg.rot)
             scale = random.uniform(1-self.cfg.scale,1+self.cfg.scale)
+            h,w,d = img.shape[:3]
             if self.cfg.z_enable:
                 dims = random.sample(range(3),k=random.randint(1,3))
             else:
-                dims = random.sample(range(3),k=random.randint(1,2))
-            for d in dims:
-               slices
-               img,mask= rotate(img,mask,ang,scale)
+                dims = random.sample(range(2),k=random.randint(1,2))
+            for idx in dims:
+               slices=[slice(0,h),slice(0,w),slice(0,d)]
+               for i in range(img.shape[idx]):
+                   slices[idx] = slice(i)
+                   img[slices[0],slices[1],slices[2],:]= rotate(img[slices[0],slices[1],slices[2],:],ang,scale)
+                   mask[slices[0],slices[1],slices[2],:] = rotate(mask[slices[0],slices[1],slices[2],:],ang,scale,interp=cv2.INTER_NEAREST)
+        if ('elastic' in augs) and self.elastic:
+            h,w,d = img.shape[:3]
+            mu = 0
+            sigma = random.uniform(0,self.elastic)
+
+            dx = np.random.normal(mu, sigma, (3,3))
+            dx_img = cv2.resize(dx, (w,h), interpolation=cv2.INTER_CUBIC)
+
+            dy = np.random.normal(mu, sigma, (3,3))
+            dy_img = cv2.resize(dx, (w,h), interpolation=cv2.INTER_CUBIC)
+
+            for z in range(d):
+                img[:, :, z, :] = elastic(img[:,:,z,:],dx_img, dy_img,cv2.INTER_CUBIC)
+                mask[:, :, z, :] = elastic(mask[:, :, z, :], dx_img, dy_img, cv2.INTER_NEAREST)
+            if self.z_enable:
+                dx_img = np.zeros((h,w))
+                dy = np.random.normal(mu, sigma, (3,3))
+                dy_img = cv2.resize(dx, (w,h), interpolation=cv2.INTER_CUBIC)
+                for y in range(h):
+                    img[y, ...] = elastic(img[y,...],dx_img, dy_img)
+                    mask[y, ...] = elastic(mask[y,...], dx_img, dy_img, cv2.INTER_NEAREST)
+        if ('intensity' in augs) and self.cfg.intensity:
+            for i in range(img.shape[-1]): 
+                img[:, :, :, i] *= (1 + np.random.uniform(-self.cfg.intensity,self.cfg.intensity))
+        return img,mask
+
     def __len__(self):
         return len(self.imgs)
 
     def img_to_tensor(self,img):
-        data = torch.tensor(np.transpose(img,[2,0,1]),dtype=torch.float)
-        if data.max()>1:
-            data /= 255.0
+        data = torch.tensor(np.transpose(img,[3,0,1,2]),dtype=torch.float)
         return data
-    def gen_gts(self,anno):
-        gts = torch.zeros((anno['obj_num'],ls+4),dtype=torch.float)
-        if anno['obj_num'] == 0:
-            return gts
-        labels = torch.tensor(anno['labels'])[:,:ls+4]
-        assert labels.shape[-1] == ls+4
-        gts[:,0] = labels[:,0]
-        gts[:,ls] = (labels[:,ls]+labels[:,ls+2])/2
-        gts[:,ls+1] = (labels[:,ls+1]+labels[:,ls+3])/2
-        gts[:,ls+2] = (labels[:,ls+2]-labels[:,ls])
-        gts[:,ls+3] = (labels[:,ls+3]-labels[:,ls+1])
-        return gts
+    def gen_gts(self,mask):
+        #transfer to on-shot
+        return mask
         
-    def normalize_gts(self,labels,size):
-        #transfer
-        if len(labels)== 0:
-            return labels
-        labels[:,ls:]/=size 
-        return labels
-
-    def pad_to_square(self,img):
-        h,w,_= img.shape
-        ts = max(h,w)
-        diff1 = abs(h-ts)
-        diff2 = abs(w-ts)
-        pad = (diff1//2,diff2//2,diff1-diff1//2,diff2-diff2//2)
-        img = cv2.copyMakeBorder(img,pad[0],pad[2],pad[1],pad[3],cv2.BORDER_CONSTANT,0)
-        return img,(pad[0],pad[1])
 
     def __getitem__(self,idx):
-        name = self.imgs[idx]
-        anno = self.annos[name]
-        img = cv2.imread(os.path.join(self.img_path,name+'.jpg'))
-        ##print(img.shape)
-        img = cv2.cvtColor(img,cv2.COLOR_BGR2RGB)
-        h,w = img.shape[:2]        
-        labels = self.gen_gts(anno)
         #print(name)
         if self.mode=='train':
             aug = []
             if self.aug:
-                
-            img,pad = self.pad_to_square(img)
-            size = img.shape[0]
-            labels[:,ls]+= pad[1]
-            labels[:,ls+1]+= pad[0]
+                img,mask = self.random_aug_3d(img,mask)
+            labels = self.gen_gts(mask)
             data = self.img_to_tensor(img)
-            labels = self.normalize_gts(labels,size)
             return data,labels      
         else:
             #validation set
-            img,pad = self.pad_to_square(img)
-            img = resize(img,(self.cfg.size,self.cfg.size))
             data = self.img_to_tensor(img)
-            info ={'size':(h,w),'img_id':name,'pad':pad}
             if self.mode=='val':
-                return data,labels,info
+                labels = self.gen_gts(mask)
+                return data,labels
             else:
-                return data,info
-    def collate_fn(self,batch):
-        if self.mode=='test':
-            data,info = list(zip(*batch))
-            data = torch.stack(data)
-            info = stack_dicts(info)
-            return data,info 
-        elif self.mode=='val':
-            data,labels,info = list(zip(*batch))
-            info = stack_dicts(info)
-            data = torch.stack(data)
-        elif self.mode=='train':
-            data,labels = list(zip(*batch))
-            if (self.accm_batch % 10 == 0)and (self.aug):
-                self.size = random.choice(self.cfg.sizes)
-            tsize = (self.size,self.size)
-            self.accm_batch += 1
-            data = torch.stack([F.interpolate(img.unsqueeze(0),tsize,mode='bilinear').squeeze(0) for img in data]) #multi-scale-training   
-        tmp =[]
-                   
-                
-        for i,bboxes in enumerate(labels):
-            if len(bboxes)>0:
-                label = torch.zeros(len(bboxes),ls+5)
-                
-                label[:,0] = i
-                tmp.append(label)
-        if len(tmp)>0:
-            labels = torch.cat(tmp,dim=0)
-            labels = labels.reshape(-1,ls+5)
-        else:
-            labels = torch.tensor(tmp,dtype=torch.float).reshape(-1,ls+5)
-        if self.mode=='train':
-            return data,labels
-        else:
-            return data,labels,info
+                #test
+                return data,offsets
 
                 
 

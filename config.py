@@ -45,7 +45,8 @@ class Config:
             self.crop = 0.15
             self.trans = .15
             self.scale = 0.1
-            self.elastic = 0.1
+            self.intensity = 0.2
+            self.elastic = 10
             
         elif mode=='val':
             self.file = f'./data/val.json'
