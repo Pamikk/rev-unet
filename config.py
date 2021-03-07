@@ -7,9 +7,10 @@ class Config:
     def __init__(self,mode='train'):
         #Path Setting
         self.checkpoint='../checkpoints'
-        self.cls_num = 20        
+        self.cls_num = 2        
         self.tsize = (48, 64, 48)
         self.channel = 1
+        self.channels = [] #nework channels
         
         self.bs = 8       
         self.augment = False
