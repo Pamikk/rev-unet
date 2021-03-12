@@ -19,7 +19,7 @@ subset_size = 40
 dtype = np.float32
 inp_exts = ['']
 mask_exts = ['_seg']
-tsize = (48, 64, 48)
+tsize = (48, 48, 48)
 channel = 1
 
 def get_mode(idx):

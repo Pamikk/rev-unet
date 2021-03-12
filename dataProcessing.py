@@ -109,12 +109,13 @@ class Mydataset(data.Dataset):
         self.mode = mode
         self.imgs = data[f'imgs_{mode}']
         if mode!='test':
-            
             self.masks = data[f'masks_{mode}']
         else:
             self.offsets = data[f'offset_{mode}']
         self.size = cfg.tsize
         self.aug = aug
+        self.cls_num = cfg.cls_num
+        self.indices = cfg.indices
     def random_aug_3d(self,img,mask):
         if len(img.shape) < 4:
             img = np.expand_dims(img,axis=-1)
@@ -179,16 +180,16 @@ class Mydataset(data.Dataset):
     def img_to_tensor(self,img):
         if len(img.shape) < 4:
             img = np.expand_dims(img,axis=-1)
-        data = torch.tensor(np.transpose(img,[3,0,1,2]),dtype=torch.float)
+        img = np.transpose(img,[3,0,1,2]).copy()
+        data = torch.tensor(img,dtype=torch.float)
         return data
     def gen_gts(self,mask):
         #transfer to one-hot
         mask = mask.squeeze()
         h,w,d = mask.shape[:3]
-        idxs = np.unique(mask).astype(int)
-        labels = torch.zeros((h,w,d,len(idxs)),dtype=torch.float)
-        for i in idxs:
-            labels[...,i] = torch.tensor(mask == i)
+        labels = torch.zeros((self.cls_num+1,h,w,d),dtype=torch.float)
+        for i,idx in enumerate(self.indices):
+            labels[i,...] = torch.tensor(mask == idx)
         return labels
     def __getitem__(self,idx):
         #print(name)

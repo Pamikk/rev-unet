@@ -1,16 +1,21 @@
 
 import numpy as np
 import random
+
 import json
 #Train Setting
 class Config:
     def __init__(self,mode='train'):
         #Path Setting
         self.checkpoint='../checkpoints'
-        self.cls_num = 2        
+        self.cls_num = 2
+        self.indices = [1,2]        
         self.tsize = (48, 64, 48)
         self.channel = 1
-        self.channels = [] #nework channels
+        self.channels = [60,120,240,360][:int(np.log2(min(self.tsize)/3))]+[480] #reduce levels for small resolution
+        #3 is the smallest size of feature map
+        #highest channel is 480
+        self.depth = 2
         
         self.bs = 8       
         self.augment = False
@@ -27,12 +32,8 @@ class Config:
         self.val_every_k_epoch = 10
         self.adjust_lr = False
         #loss hyp
-        self.obj_scale = 2
-        self.noobj_scale = 5
-        self.cls_scale = 1
-        self.reg_scale = 1#for giou
-        self.ignore_threshold = 0.5
-        self.match_threshold = 0#regard as match above this threshold
+        self.bce_scale = 1
+        self.dice_scale = 1
         self.base_epochs = [-1]#base epochs with large learning rate,adjust lr_facter with 0.1
         if mode=='train':
             self.file_path=f'../dataset/Mydataset/processed/data_train.hdf5'
