@@ -43,8 +43,10 @@ def process_test_data(input_path,save_path,channels,tsize):
         if set_size>0:
             datasets[f'imgs_{mode}'] = hdf5_file.create_dataset(f'imgs_{mode}',(set_size,)+tuple(tsize)+(channels,),dtype=dtype)
             datasets[f'offset_{mode}'] = hdf5_file.create_dataset(f'offset_{mode}',(set_size,3),dtype=dtype)
+            datasets[f'names_{mode}'] = hdf5_file.create_dataset(f'names_{mode}',(set_size,),dtype=h5py.special_dtype(vlen=str))
     img_list = {'test': []}
     offset_list = {'test': []}
+    name_list = {'test': []}
     mH,mW,mD = 0,0,0 #max img size
     for mode in file_list:
         print(f'Start processing {mode} images')
@@ -72,14 +74,15 @@ def process_test_data(input_path,save_path,channels,tsize):
 
             img_list[mode].append(img)
             offset_list[mode].append(offset)
+            name_list[mode].append(fname)
 
             write_buffer += 1
 
             if write_buffer >= BUFFER_SIZE:
 
                 counter_to = count + write_buffer
-                write_to_hdf5_test(datasets, mode, img_list, offset_list, count, counter_to)
-                release_tmp_memory([img_list, offset_list], mode)
+                write_to_hdf5_test(datasets, mode, img_list, offset_list, name_list, count, counter_to)
+                release_tmp_memory([img_list, offset_list,name_list], mode)
 
                 # reset stuff for next iteration
                 count = counter_to
@@ -89,7 +92,7 @@ def process_test_data(input_path,save_path,channels,tsize):
         counter_to = count + write_buffer
 
         if len(file_list[mode]) > 0:
-            write_to_hdf5_test(datasets, mode, img_list, offset_list, count,counter_to)
+            write_to_hdf5_test(datasets, mode, img_list, offset_list, name_list,count,counter_to)
         release_tmp_memory([img_list, offset_list], mode)
     hdf5_file.close()
     print(mW,mH,mD)
@@ -113,8 +116,10 @@ def process_train_data(input_path,save_path,channels,tsize):
         if set_size>0:
             datasets[f'imgs_{mode}'] = hdf5_file.create_dataset(f'imgs_{mode}',(set_size,)+tuple(tsize)+(channels,),dtype=dtype)
             datasets[f'masks_{mode}'] = hdf5_file.create_dataset(f'masks_{mode}',(set_size,)+tuple(tsize),dtype=np.uint8)
+            datasets[f'names_{mode}'] = hdf5_file.create_dataset(f'names_{mode}',(set_size,),dtype=h5py.special_dtype(vlen=str))
     img_list = {'train': [], 'val': [],'trainval':[]}
     mask_list = {'train': [], 'val': [],'trainval':[]}
+    name_list = {'train': [], 'val': [],'trainval':[]}
     mH,mW,mD = 0,0,0 #max img size
     for mode in file_list:
         print(f'Start processing {mode} images')
@@ -146,14 +151,15 @@ def process_train_data(input_path,save_path,channels,tsize):
 
             img_list[mode].append(img)
             mask_list[mode].append(mask)
+            name_list[mode].append(fname)
 
             write_buffer += 1
 
             if write_buffer >= BUFFER_SIZE:
 
                 counter_to = count + write_buffer
-                write_to_hdf5(datasets, mode, img_list, mask_list, count, counter_to)
-                release_tmp_memory([img_list, mask_list], mode)
+                write_to_hdf5(datasets, mode, img_list, mask_list, name_list,count, counter_to)
+                release_tmp_memory([img_list, mask_list,name_list], mode)
 
                 # reset stuff for next iteration
                 count = counter_to
@@ -163,7 +169,7 @@ def process_train_data(input_path,save_path,channels,tsize):
         counter_to = count + write_buffer
 
         if len(file_list[mode]) > 0:
-            write_to_hdf5(datasets, mode, img_list, mask_list, count,counter_to)
+            write_to_hdf5(datasets, mode, img_list, mask_list, name_list,count,counter_to)
         release_tmp_memory([img_list, mask_list], mode)
     hdf5_file.close()
     print(mW,mH,mD)

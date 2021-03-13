@@ -31,7 +31,7 @@ def dice_loss_sigmoid(pds,gts,res={}):
 def dice_loss_softmax(pds,gts,res={}):
     pds = torch.softmax(pds,dim=1)
     if gts is None:
-        val = torch.max(val,keepdim=True)[0]
+        val = torch.max(pds,dim=1,keepdim=True)[0]
         preds = (pds == val).float()
         return preds
     total = torch.tensor(0.0,device=pds.device,dtype=pds.dtype)
@@ -49,7 +49,7 @@ class LossAPI(nn.Module):
         self.weights = [cfg.dice_scale,cfg.bce_scale]
     def forward(self,out,gt=None):
         if gt is None:
-            return self.loss[0](out)
+            return self.loss[0](out,gt)
         res = {}
         total = torch.tensor(0.0,device=out.device,dtype=out.dtype)
         for idx,loss in enumerate(self.loss):

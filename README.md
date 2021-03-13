@@ -11,20 +11,20 @@
     + utils - necessary function
       + maybe move evaluation metric here?
     + network
+      + no-new-net with different elemental blocks 
     + loss
     + backbone network
-    + network configuration
+      + network blocks
   + dataProcessing
     + dataloader for train and test
   + Utils
     + logger
     + evaluation/metric
-    + non-maximum-supression
   + visualization - jupyter notebook
   + Trainer - APIs
     + save/load weights
     + lr scheduler
-    + optimizer(sometimes need to pass in network for things like GAN)    
+    + optimizer   
   + train
   + test
   + evaluation - evaluate predicted result

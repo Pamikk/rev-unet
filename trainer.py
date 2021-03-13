@@ -10,7 +10,7 @@ import json
 import random
 from functools import reduce
 
-from utils import Logger,eval_single_img
+from utils import Logger,eval_single_img,save_nib_img
 class Trainer:
     def __init__(self,cfg,datasets,net,epoch):
         self.cfg = cfg
@@ -127,6 +127,7 @@ class Trainer:
         if self.bestMovingLoss>loss:
             self.bestMovingLoss = loss
             self.bestMovingLossEpoch = epoch
+            print('saving...')
             self.save_epoch('bestm',epoch)
     def calnetParametersNum(self):
         num = 0
@@ -192,7 +193,7 @@ class Trainer:
             lr = self.optimizer.param_groups[0]['lr']
             self.logger.write_loss(epoch,running_loss,lr)
             #step lr
-            self._updateRunningLoss(running_loss['all'],epoch)
+            
             if not self.warm_up(epoch):
                 self.lr_sheudler.step(running_loss['all'])
             lr_ = self.optimizer.param_groups[0]['lr']
@@ -213,6 +214,7 @@ class Trainer:
                 if self.trainval:
                     metrics = self.validate(epoch,'train',self.save_pred)
                     self.logger.write_metrics(epoch,metrics,tosave,mode='Trainval')
+            self._updateRunningLoss(running_loss['all'],epoch)
             print(f"best so far with {self.best_Acc} at epoch:{self.best_Acc_epoch}")
             epoch +=1
                 
@@ -230,25 +232,33 @@ class Trainer:
             for data in tqdm(valset):
                 inputs,labels = data
                 pds = self.net(inputs.to(self.device).float())
-                nB = pds.shape[0]
-                ngt += labels.shape[0]              
+                nB = pds.shape[0]             
                 for b in range(nB):
                     metric_ = eval_single_img(pds[b],labels[b])
                     for k in metric_:
                         if k not in (metrics.keys()):
-                            metrics[k] = 0.0
+                            metrics[k] = []
                         if not np.isnan(metric_[k]):
-                            metrics[k] += metric_[k]/(nB*1.0) 
+                            metrics[k].append(metric_[k])
+        for k in metrics:
+            metrics[k] = np.mean(metrics[k])
         return metrics
     def test(self):
         self.net.eval()
         res = []
         with torch.no_grad():
             for data in tqdm(self.testset):
-                inputs,offsets = data
+                inputs,offsets,names = data
                 pds = self.net(inputs.to(self.device).float())
                 nB = pds.shape[0]
-        self.logMemoryUsage()
+                for i in range(nB):
+                    xOffset, yOffset, zOffset = offsets[i]
+                    c,h,w,d = pds[i].shape
+                    nh,nw,nd = h+xOffset,w+yOffset,d+zOffset
+                    result = torch.zeros([c,nh,nw,nd])
+                    result[:,xOffset:xOffset+h,yOffset:yOffset+w,zOffset:zOffset+d]=pds[i]
+                    npResult = result.cpu().numpy()
+                    save_nib_img(self.predictions,names[i],npResult)
         return res
     def validate_random(self):
         raise NotImplementedError

@@ -103,15 +103,17 @@ def flip(src,mask,dim):
     mask =np.flip(mask,dim)
     return dst,mask
 class Mydataset(data.Dataset):
-    def __init__(self,cfg,mode='train',aug=True):
+    def __init__(self,cfg,mode='train',aug=True,test_mode='test'):
         self.cfg = cfg
         data = h5py.File(cfg.file_path,'r')
         self.mode = mode
-        self.imgs = data[f'imgs_{mode}']
         if mode!='test':
             self.masks = data[f'masks_{mode}']
+            self.imgs = data[f'imgs_{mode}']
         else:
-            self.offsets = data[f'offset_{mode}']
+            self.offsets = data[f'offset_{test_mode}']
+            self.imgs = data[f'imgs_{test_mode}']
+            self.img_names = data[f'names_{test_mode}']
         self.size = cfg.tsize
         self.aug = aug
         self.cls_num = cfg.cls_num
@@ -203,7 +205,8 @@ class Mydataset(data.Dataset):
             return data,labels      
         else:
             offset = torch.tensor(self.offsets[idx])
-            return data,offset
+            imgName = self.img_names[idx]
+            return data,offset,imgName
 
                 
 

@@ -68,19 +68,21 @@ def normalise_image(image):
     normalized = np.divide((image - m), s)
     image = np.where(image == 0, 0, normalized)
     return image
-def write_to_hdf5(dataset, mode, img_list, mask_list, start,end):
+def write_to_hdf5(dataset, mode, img_list, mask_list, name_list,start,end):
 
     img_arr = np.asarray(img_list[mode], dtype=np.float32)
     mask_arr = np.asarray(mask_list[mode], dtype=np.uint8)
     
     dataset[f'imgs_{mode}'][start:end, ...] = img_arr
     dataset[f'masks_{mode}'][start:end, ...] = mask_arr
-def write_to_hdf5_test(dataset, mode, img_list, offset_list, start,end):
+    dataset[f'names_{mode}'][start:end, ...] = name_list[mode]
+def write_to_hdf5_test(dataset, mode, img_list, offset_list,name_list, start,end):
 
     img_arr = np.asarray(img_list[mode], dtype=np.float32)
     offset_arr = np.asarray(offset_list[mode], dtype=np.float32)
     dataset[f'imgs_{mode}'][start:end, ...] = img_arr
     dataset[f'offset_{mode}'][start:end, ...] = offset_arr
+    dataset[f'names_{mode}'][start:end, ...] = name_list[mode]
 def release_tmp_memory(lists,mode):
     '''
     Helper function to reset the tmp lists and free the memory

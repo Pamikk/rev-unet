@@ -9,6 +9,7 @@ import cv2
 from tqdm import tqdm
 from scipy.ndimage.morphology import distance_transform_edt, binary_erosion,\
     generate_binary_structure
+import nibabel as nib
 
 def tensor_to_img(src):
     dst = np.transpose(src.cpu().numpy(),[1,2,0])
@@ -54,12 +55,12 @@ def eval_single_hd95(result, reference):
     nearest partner surface voxel of a binary object in reference.
     modify from medpy _surface_distances
     """
-    if 0 == numpy.count_nonzero(result): 
+    if 0 == np.count_nonzero(result): 
         return np.nan()
-    if 0 == numpy.count_nonzero(reference): 
+    if 0 == np.count_nonzero(reference): 
         return np.nan()
-    result = numpy.atleast_1d(result.astype(numpy.bool))
-    reference = numpy.atleast_1d(reference.astype(numpy.bool))
+    result = np.atleast_1d(result.astype(np.bool))
+    reference = np.atleast_1d(reference.astype(np.bool))
             
     # binary structure
     footprint = generate_binary_structure(result.ndim, 1)
@@ -83,35 +84,41 @@ def eval_single_dice(pd,gt):
         return 0,0,0
     inters = (pd*gt).sum()
     cover = pd.sum() + gt.sum()
-    
-    dc = (2*inters+1)/(cover+1)
-    precision = (inters+1)/(pd.sum()+1)
-    recall = (inters+1)/(gt.sum()+1)
+    assert 2*inters<=cover
+    dc = (2*inters)/(cover+1)
+    precision = (inters)/(pd.sum()+1)
+    recall = (inters)/(gt.sum()+1)
     return dc,precision,recall
 
 def eval_single_img(pds,gts,each_cls=True):
     assert pds.shape==gts.shape
+    pds = pds.cpu().numpy()
+    gts = gts.cpu().numpy()
     nC = pds.shape[0]
     metrics = {'dice':0.0,'prec':0.0,'recall':0.0}
     val = 10e9
+    C = nC-1
     for i in range(nC):
         dc,p,r = eval_single_dice(pds[i,...],gts[i,...])
-        hd95 = eval_single_dice(pds[i,...],gts[i,...])
+        hd95 = eval_single_hd95(pds[i,...],gts[i,...])
         if (each_cls):
             metrics[f'dice_c{i}'] = dc
             metrics[f'prec_c{i}'] = p
             metrics[f'recall_c{i}'] = r
             metrics[f'hd95_c{i}'] = hd95
         if i>0:
-            metrics['dice'] += dc/nC
-            metrics['prec'] += p/nC
-            metrics['recall'] += r/nC
+            metrics['dice'] += dc/C
+            metrics['prec'] += p/C
+            metrics['recall'] += r/C
             if not(np.isnan(hd95)):
                 val = min(val,hd95)
     metrics['hd95'] = val
     return metrics
                 
+def save_nib_img(path, name, data):
 
+    nimg = nib.Nifti1Image(data, affine=None)
+    nimg.to_filename(os.path.join(path,f'{name}.nii.gz'))
         
 
 

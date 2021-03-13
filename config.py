@@ -9,8 +9,8 @@ class Config:
         #Path Setting
         self.checkpoint='../checkpoints'
         self.cls_num = 2
-        self.indices = [1,2]        
-        self.tsize = (48, 64, 48)
+        self.indices = [0,1,2]        
+        self.tsize = (48, 48, 48)
         self.channel = 1
         self.channels = [60,120,240,360][:int(np.log2(min(self.tsize)/3))]+[480] #reduce levels for small resolution
         #3 is the smallest size of feature map
